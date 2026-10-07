@@ -1,6 +1,8 @@
 #include "ui.hpp"
 #include "esp.hpp"
 #include "offsets.hpp"
+#include "overlay.hpp"
+#include "injector.hpp"
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
@@ -18,17 +20,23 @@ enum : int {
     IDC_TEAM,
     IDC_MAXDIST_EDIT,
     IDC_APPLY,
+    IDC_PID_EDIT,
+    IDC_START,
+    IDC_STOP,
     IDC_STATUS,
 };
 
 HWND gChecks[6]{};
 HWND gDistEdit = nullptr;
+HWND gPidEdit = nullptr;
 HWND gStatus = nullptr;
 
 void RefreshStatus() {
     std::wstring s = L"Client: ";
     s += std::wstring(Offsets::ClientVersion.begin(), Offsets::ClientVersion.end());
     s += esp::g.enabled ? L"  |  ESP ON" : L"  |  ESP OFF";
+    s += L"\n";
+    s += L"overlay: " + overlay::Status();
     SetWindowTextW(gStatus, s.c_str());
 }
 
@@ -66,12 +74,43 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if ((id >= IDC_ENABLED && id <= IDC_TEAM && ev == BN_CLICKED) || id == IDC_APPLY) {
             CheckToSettings();
             esp::Save(esp::ConfigPath());
+        } else if (id == IDC_START && ev == BN_CLICKED) {
+            CheckToSettings();
+            esp::Save(esp::ConfigPath());
+            wchar_t buf[32]{};
+            GetWindowTextW(gPidEdit, buf, 32);
+            uint32_t pid = 0;
+            try {
+                pid = static_cast<uint32_t>(std::stoul(buf));
+            } catch (...) {
+            }
+            if (pid == 0) {
+                auto pids = injector::FindRobloxProcesses();
+                if (!pids.empty())
+                    pid = pids.front();
+            }
+            if (pid == 0) {
+                SetWindowTextW(gStatus, L"no Roblox found: start the game or enter PID");
+            } else {
+                std::wstring err;
+                if (!overlay::Start(pid, err))
+                    SetWindowTextW(gStatus, (L"start failed: " + err).c_str());
+                else
+                    RefreshStatus();
+            }
+        } else if (id == IDC_STOP && ev == BN_CLICKED) {
+            overlay::Stop();
+            RefreshStatus();
         }
         return 0;
     }
+    case WM_TIMER:
+        RefreshStatus();
+        return 0;
     case WM_CLOSE:
         CheckToSettings();
         esp::Save(esp::ConfigPath());
+        overlay::Stop();
         DestroyWindow(hwnd);
         return 0;
     case WM_DESTROY:
@@ -97,7 +136,7 @@ void RunEspUi() {
 
     HWND wnd = CreateWindowExW(0, cls, L"skibslocker - Player ESP", WS_OVERLAPPED | WS_CAPTION |
                                                             WS_SYSMENU | WS_MINIMIZEBOX,
-                               CW_USEDEFAULT, CW_USEDEFAULT, 300, 360, nullptr, nullptr, h, nullptr);
+                               CW_USEDEFAULT, CW_USEDEFAULT, 300, 470, nullptr, nullptr, h, nullptr);
     if (!wnd)
         return;
 
@@ -116,9 +155,21 @@ void RunEspUi() {
                                 nullptr);
     CreateWindowExW(0, L"BUTTON", L"Apply", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 16, 232, 100, 28,
                     wnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_APPLY)), h, nullptr);
-    gStatus = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE, 16, 270, 260, 40, wnd,
+    CreateWindowExW(0, L"STATIC", L"PID (blank = auto):", WS_CHILD | WS_VISIBLE, 16, 270, 130, 22,
+                    wnd, nullptr, h, nullptr);
+    gPidEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_NUMBER,
+                               150, 268, 100, 24, wnd,
+                               reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_PID_EDIT)), h,
+                               nullptr);
+    CreateWindowExW(0, L"BUTTON", L"Start ESP", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 16, 300,
+                    110, 30, wnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_START)), h,
+                    nullptr);
+    CreateWindowExW(0, L"BUTTON", L"Stop", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 136, 300, 110,
+                    30, wnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_STOP)), h, nullptr);
+    gStatus = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE, 16, 340, 260, 70, wnd,
                               reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_STATUS)), h, nullptr);
     RefreshStatus();
+    SetTimer(wnd, 1, 1000, nullptr);
 
     ShowWindow(wnd, SW_SHOW);
     UpdateWindow(wnd);

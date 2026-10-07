@@ -1,0 +1,32 @@
+#pragma once
+#include "mem.hpp"
+#include <string>
+#include <vector>
+
+namespace roblox {
+
+struct PlayerEntry {
+    std::string name;
+    uintptr_t team = 0;
+    float health = 0;
+    float maxHealth = 100;
+    mem::Vec3 root{};
+    bool hasRoot = false;
+    bool isLocal = false;
+};
+
+struct Snapshot {
+    std::vector<PlayerEntry> players;
+    mem::ViewMatrix view{};
+    bool hasView = false;
+    int screenW = 0;
+    int screenH = 0;
+    std::wstring error;
+};
+
+// One full ESP refresh. Returns false on fatal attach/read failure (see error).
+bool Refresh(const mem::Reader& r, Snapshot& out, bool teamCheck, float maxDist);
+
+uintptr_t GetModuleBase(uint32_t pid);
+
+} // namespace roblox

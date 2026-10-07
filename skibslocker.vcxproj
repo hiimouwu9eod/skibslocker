@@ -76,10 +76,16 @@
     <ClCompile Include="injector.cpp" />
     <ClCompile Include="esp.cpp" />
     <ClCompile Include="ui.cpp" />
+    <ClCompile Include="mem.cpp" />
+    <ClCompile Include="roblox.cpp" />
+    <ClCompile Include="overlay.cpp" />
     <ClInclude Include="offsets.hpp" />
     <ClInclude Include="injector.hpp" />
     <ClInclude Include="esp.hpp" />
     <ClInclude Include="ui.hpp" />
+    <ClInclude Include="mem.hpp" />
+    <ClInclude Include="roblox.hpp" />
+    <ClInclude Include="overlay.hpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
