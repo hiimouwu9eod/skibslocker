@@ -8,6 +8,7 @@
 #include "injector.hpp"
 #include "esp.hpp"
 #include "ui.hpp"
+#include "roblox.hpp"
 
 static void PrintOffsets() {
     std::cout << "skibslocker" << std::endl;
@@ -25,7 +26,8 @@ static void PrintUsage(const char* exe) {
               << "  " << exe << "                 print offsets\n"
               << "  " << exe << " list            list Roblox PIDs\n"
               << "  " << exe << " inject <dll> [--pid <id>] [--wait <sec>]\n"
-              << "  " << exe << " ui              open Player ESP toggles window\n";
+              << "  " << exe << " ui              open Player ESP toggles window\n"
+              << "  " << exe << " diag [--pid <id>]  dump DataModel walk (debug)\n";
 }
 
 static std::wstring ToWide(const std::string& s) {
@@ -100,6 +102,25 @@ int main(int argc, char** argv) {
     if (cmd == "ui") {
         esp::Load(esp::ConfigPath());
         ui::RunEspUi();
+        return 0;
+    }
+    if (cmd == "diag") {
+        uint32_t pid = 0;
+        for (int i = 2; i < argc; ++i) {
+            std::string a = argv[i];
+            if (a == "--pid" && i + 1 < argc)
+                pid = static_cast<uint32_t>(std::stoul(argv[++i]));
+        }
+        if (pid == 0) {
+            auto pids = injector::FindRobloxProcesses();
+            if (!pids.empty())
+                pid = pids.front();
+        }
+        if (pid == 0) {
+            std::cout << "no RobloxPlayerBeta.exe found\n";
+            return 1;
+        }
+        std::cout << "pid=" << pid << "\n" << roblox::Diag(pid);
         return 0;
     }
     PrintUsage(argv[0]);

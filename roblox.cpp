@@ -1,6 +1,7 @@
 #include "roblox.hpp"
 #include "offsets.hpp"
 #include <cmath>
+#include <cstdio>
 #include <tlhelp32.h>
 
 namespace roblox {
@@ -84,6 +85,118 @@ uintptr_t GetModuleBase(uint32_t pid) {
         base = reinterpret_cast<uintptr_t>(me.modBaseAddr);
     CloseHandle(snap);
     return base;
+}
+
+std::string Diag(uint32_t pid) {
+    char buf[256];
+    std::string rep;
+    mem::Reader r;
+    std::wstring err;
+    if (!r.attach(pid, err)) {
+        rep += "attach: FAIL\n";
+        return rep;
+    }
+    uintptr_t base = r.base();
+    snprintf(buf, sizeof(buf), "base=0x%llx\n", (unsigned long long)base);
+    rep += buf;
+
+    uintptr_t fake = 0;
+    bool okFake = r.read<uintptr_t>(base + Offsets::FakeDataModel::Pointer, fake);
+    snprintf(buf, sizeof(buf), "fake read=%d val=0x%llx\n", okFake, (unsigned long long)fake);
+    rep += buf;
+    if (!okFake)
+        return rep + "STOP: FakeDataModel unreadable\n";
+
+    uintptr_t dm = 0;
+    bool okDm = r.read<uintptr_t>(fake + Offsets::FakeDataModel::RealDataModel, dm);
+    snprintf(buf, sizeof(buf), "datamodel read=%d val=0x%llx\n", okDm, (unsigned long long)dm);
+    rep += buf;
+    if (!okDm)
+        return rep + "STOP: RealDataModel unreadable\n";
+
+    uintptr_t ws = 0;
+    bool okWs = r.read<uintptr_t>(dm + Offsets::DataModel::Workspace, ws);
+    snprintf(buf, sizeof(buf), "workspace read=%d val=0x%llx\n", okWs, (unsigned long long)ws);
+    rep += buf;
+
+    uintptr_t start = 0, end = 0;
+    bool okS = r.read<uintptr_t>(dm + Offsets::Instance::ChildrenStart, start);
+    bool okE = r.read<uintptr_t>(dm + Offsets::Instance::ChildrenStart + 8, end);
+    snprintf(buf, sizeof(buf), "children start read=%d val=0x%llx\n", okS,
+             (unsigned long long)start);
+    rep += buf;
+    snprintf(buf, sizeof(buf), "children end read=%d val=0x%llx\n", okE, (unsigned long long)end);
+    rep += buf;
+    if (okS && okE && end >= start) {
+        size_t count = (end - start) / 8;
+        snprintf(buf, sizeof(buf), "children count=%llu\n", (unsigned long long)count);
+        rep += buf;
+    } else {
+        rep += "NOTE: [0x78]/[0x80] not a valid vector.\n";
+        auto tryStr = [&](uintptr_t o, std::string& s) -> bool {
+            uintptr_t dp = 0;
+            uint32_t ln = 0;
+            if (!r.read<uintptr_t>(o, dp) || !r.read<uint32_t>(o + 0x10, ln))
+                return false;
+            if (dp < 0x10000 || ln == 0 || ln > 64)
+                return false;
+            std::vector<char> sb(ln + 1, 0);
+            if (!r.readBytes(dp, sb.data(), ln))
+                return false;
+            s.assign(sb.data(), ln);
+            return true;
+        };
+        // DataModel's own class via static desc at dm+0x18.
+        uintptr_t dmDesc = 0;
+        r.read<uintptr_t>(dm + Offsets::Instance::ClassDescriptor, dmDesc);
+        std::string dmCls;
+        bool okCls = tryStr(dmDesc + Offsets::Instance::ClassName, dmCls);
+        snprintf(buf, sizeof(buf), "dmDesc=0x%llx class ok=%d '%s'\n", (unsigned long long)dmDesc,
+                 okCls, dmCls.c_str());
+        rep += buf;
+        // Player hunt: every table entry with a DisplayName string + ModelInstance.
+        uintptr_t t0 = 0, t1 = 0;
+        r.read<uintptr_t>(dm + 0xa0, t0);
+        r.read<uintptr_t>(dm + 0xa8, t1);
+        size_t tn = (t1 > t0) ? (t1 - t0) / 8 : 0;
+        snprintf(buf, sizeof(buf), "table count=%llu -- players:\n", (unsigned long long)tn);
+        rep += buf;
+        for (size_t i = 0; i < tn && i < 2000; ++i) {
+            uintptr_t k = 0;
+            if (!r.read<uintptr_t>(t0 + i * 8, k) || k < 0x10000)
+                continue;
+            std::string dn;
+            if (!tryStr(k + Offsets::Player::DisplayName, dn) || dn.empty())
+                continue;
+            uintptr_t model = 0, team = 0;
+            uint64_t uid = 0;
+            r.read<uintptr_t>(k + Offsets::Player::ModelInstance, model);
+            r.read<uintptr_t>(k + Offsets::Player::Team, team);
+            r.read<uint64_t>(k + Offsets::Player::UserId, uid);
+            snprintf(buf, sizeof(buf), "  [%llu] k=0x%llx display='%s' uid=%llu model=0x%llx team=0x%llx\n",
+                     (unsigned long long)i, (unsigned long long)k, dn.c_str(),
+                     (unsigned long long)uid, (unsigned long long)model, (unsigned long long)team);
+            rep += buf;
+        }
+        return rep + "HUNT DONE\n";
+    }
+
+    size_t count = (end - start) / 8;
+    size_t show = count < 40 ? count : 40;
+    for (size_t i = 0; i < show; ++i) {
+        uintptr_t k = 0;
+        if (!r.read<uintptr_t>(start + i * 8, k)) {
+            rep += "  [i] ptr unreadable\n";
+            continue;
+        }
+        std::string n, c;
+        GetName(r, k, n);
+        GetClassName(r, k, c);
+        snprintf(buf, sizeof(buf), "  [%llu] 0x%llx name='%s' class='%s'\n", (unsigned long long)i,
+                 (unsigned long long)k, n.c_str(), c.c_str());
+        rep += buf;
+    }
+    return rep;
 }
 
 bool Refresh(const mem::Reader& r, Snapshot& out, bool teamCheck, float maxDist) {

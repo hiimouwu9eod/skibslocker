@@ -29,4 +29,8 @@ bool Refresh(const mem::Reader& r, Snapshot& out, bool teamCheck, float maxDist)
 
 uintptr_t GetModuleBase(uint32_t pid);
 
+// Read-only diagnostic: walks base -> Fake -> DataModel -> children,
+// returns a text report (for `skibslocker.exe diag`).
+std::string Diag(uint32_t pid);
+
 } // namespace roblox
