@@ -1,4 +1,20 @@
 #pragma once
+/* =============================================================
+/*                       theo's offsets                         
+/*                  https://offsets.imtheo.lol                  
+/* -------------------------------------------------------------
+/*  Dumped With     : RbxDumperV2                               
+/*  Source code     : https://git.imtheo.lol/theo/RbxDumperV2   
+/*  Roblox Version  : version-02c37bc51a384b8f
+/*  Dumper Version  : 2.2.4
+/*  Dumped At       : 20:12 29/09/2026 (GMT)
+/*  Total Offsets   : 392
+/* -------------------------------------------------------------
+/*  Join the discord!                                           
+/*  https://offsets.imtheo.lol/discord                          
+/* =============================================================
+*/
+
 #include <cstdint>
 #include <string>
 namespace Offsets {
@@ -227,7 +243,7 @@ namespace Offsets {
          inline constexpr uintptr_t NameDisplayDistance = 0x1a0;
          inline constexpr uintptr_t NameOcclusion = 0x1a4;
          inline constexpr uintptr_t PlatformStand = 0x1cc;
-         inline constexpr uintptr_t PlatformStatePointer = 0x5b7b96ce;
+         inline constexpr uintptr_t PlatformStatePointer = 0x0;
          inline constexpr uintptr_t RequiresNeck = 0x1cd;
          inline constexpr uintptr_t RigType = 0x1b0;
          inline constexpr uintptr_t SeatPart = 0xf8;
