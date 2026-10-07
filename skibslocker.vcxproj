@@ -74,8 +74,12 @@
   <ItemGroup>
     <ClCompile Include="main.cpp" />
     <ClCompile Include="injector.cpp" />
+    <ClCompile Include="esp.cpp" />
+    <ClCompile Include="ui.cpp" />
     <ClInclude Include="offsets.hpp" />
     <ClInclude Include="injector.hpp" />
+    <ClInclude Include="esp.hpp" />
+    <ClInclude Include="ui.hpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

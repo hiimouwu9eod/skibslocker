@@ -6,6 +6,8 @@
 #include <windows.h>
 #include "offsets.hpp"
 #include "injector.hpp"
+#include "esp.hpp"
+#include "ui.hpp"
 
 static void PrintOffsets() {
     std::cout << "skibslocker" << std::endl;
@@ -22,7 +24,8 @@ static void PrintUsage(const char* exe) {
     std::cout << "Usage:\n"
               << "  " << exe << "                 print offsets\n"
               << "  " << exe << " list            list Roblox PIDs\n"
-              << "  " << exe << " inject <dll> [--pid <id>] [--wait <sec>]\n";
+              << "  " << exe << " inject <dll> [--pid <id>] [--wait <sec>]\n"
+              << "  " << exe << " ui              open Player ESP toggles window\n";
 }
 
 static std::wstring ToWide(const std::string& s) {
@@ -93,6 +96,11 @@ int main(int argc, char** argv) {
             }
         }
         return ok ? 0 : 2;
+    }
+    if (cmd == "ui") {
+        esp::Load(esp::ConfigPath());
+        ui::RunEspUi();
+        return 0;
     }
     PrintUsage(argv[0]);
     return 1;
