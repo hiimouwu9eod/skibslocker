@@ -21,17 +21,8 @@ uint32_t targetPid = 0;
 
 bool WorldToScreen(const mem::ViewMatrix& vm, const mem::Vec3& p, int w, int h, float& sx,
                    float& sy, float& depth) {
-    // Column-major style (D3D-like): clip rows at m[12..15].
-    float x = vm.m[0] * p.x + vm.m[4] * p.y + vm.m[8] * p.z + vm.m[12];
-    float y = vm.m[1] * p.x + vm.m[5] * p.y + vm.m[9] * p.z + vm.m[13];
-    float z = vm.m[2] * p.x + vm.m[6] * p.y + vm.m[10] * p.z + vm.m[14];
-    float ww = vm.m[3] * p.x + vm.m[7] * p.y + vm.m[11] * p.z + vm.m[15];
-    (void)z;
-    if (ww < 0.1f)
+    if (!roblox::Project(vm, p, w, h, sx, sy, depth))
         return false;
-    depth = ww;
-    sx = (w * 0.5f) * (1.0f + x / ww);
-    sy = (h * 0.5f) * (1.0f - y / ww);
     return sx > -200 && sx < w + 200 && sy > -200 && sy < h + 200;
 }
 

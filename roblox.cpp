@@ -85,6 +85,19 @@ bool FindChildByClass(const mem::Reader& r, uintptr_t parent, const char* want, 
 
 } // namespace
 
+bool Project(const mem::ViewMatrix& vm, const mem::Vec3& p, int w, int h, float& sx,
+             float& sy, float& depth) {
+    float x = vm.m[0] * p.x + vm.m[4] * p.y + vm.m[8] * p.z + vm.m[12];
+    float y = vm.m[1] * p.x + vm.m[5] * p.y + vm.m[9] * p.z + vm.m[13];
+    float ww = vm.m[3] * p.x + vm.m[7] * p.y + vm.m[11] * p.z + vm.m[15];
+    if (ww < 0.1f)
+        return false;
+    depth = ww;
+    sx = (w * 0.5f) * (1.0f + x / ww);
+    sy = (h * 0.5f) * (1.0f - y / ww);
+    return true;
+}
+
 uintptr_t GetModuleBase(uint32_t pid) {
     HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid);
     if (snap == INVALID_HANDLE_VALUE)
@@ -252,6 +265,7 @@ bool Refresh(const mem::Reader& r, Snapshot& out, bool teamCheck, float maxDist)
             mem::Vec3 pos{};
             if (r.read<mem::Vec3>(hrp + Offsets::Primitive::Position, pos)) {
                 e.root = pos;
+                e.hrp = hrp;
                 e.hasRoot = true;
             }
         }
