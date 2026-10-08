@@ -151,20 +151,38 @@ int main(int argc, char** argv) {
                    (unsigned long long)i, pl.name.c_str(), pl.health, pl.maxHealth,
                    (unsigned long long)pl.hrp, pl.root.x,
                    pl.root.y, pl.root.z, sx, sy, d, vis ? "VIS" : "off");
-            if (i < 2 && pl.hrp) {
-                printf("  hrp float scan (offset: x y z):\n");
-                for (uintptr_t o = 0xB0; o <= 0x230; o += 4) {
-                    mem::Vec3 v{};
-                    if (!r.read<mem::Vec3>(pl.hrp + o, v))
-                        continue;
-                    // plausible world coord: finite, |v|<20000, not all ~zero
-                    if (fabsf(v.x) + fabsf(v.y) + fabsf(v.z) < 0.001f)
-                        continue;
-                    if (fabsf(v.x) > 20000 || fabsf(v.y) > 20000 || fabsf(v.z) > 20000)
-                        continue;
-                    printf("    +0x%llx: %.2f %.2f %.2f\n", (unsigned long long)o, v.x, v.y,
-                           v.z);
-                }
+        }
+        // --- position hunt: camera pos + local HRP + diff of two HRPs ---
+        {
+            uintptr_t fake = 0, dm = 0, ws = 0, cam = 0;
+            mem::Vec3 campos{};
+            bool okCam = false;
+            uintptr_t base = r.base();
+            if (r.read<uintptr_t>(base + Offsets::FakeDataModel::Pointer, fake) &&
+                r.read<uintptr_t>(fake + Offsets::FakeDataModel::RealDataModel, dm) &&
+                r.read<uintptr_t>(dm + Offsets::DataModel::Workspace, ws) &&
+                r.read<uintptr_t>(ws + Offsets::Workspace::CurrentCamera, cam) &&
+                r.read<mem::Vec3>(cam + Offsets::Camera::Position, campos))
+                okCam = true;
+            printf("camera=0x%llx pos=(%.1f,%.1f,%.1f) %s\n", (unsigned long long)cam, campos.x,
+                   campos.y, campos.z, okCam ? "OK" : "FAIL");
+        }
+        if (snap.players.size() >= 2 && snap.players[0].hrp && snap.players[1].hrp) {
+            printf("hrp diff scan (triples that DIFFER between player0/1, |v|<20000):\n");
+            for (uintptr_t o = 0x0; o <= 0x3F0; o += 4) {
+                mem::Vec3 a{}, b{};
+                if (!r.read<mem::Vec3>(snap.players[0].hrp + o, a))
+                    continue;
+                if (!r.read<mem::Vec3>(snap.players[1].hrp + o, b))
+                    continue;
+                float dx = fabsf(a.x - b.x) + fabsf(a.y - b.y) + fabsf(a.z - b.z);
+                if (dx < 0.5f)
+                    continue;
+                float m = fabsf(a.x) + fabsf(a.y) + fabsf(a.z);
+                if (m < 1.0f || m > 60000)
+                    continue;
+                printf("  +0x%llx p0=(%.1f,%.1f,%.1f) p1=(%.1f,%.1f,%.1f)\n", (unsigned long long)o,
+                       a.x, a.y, a.z, b.x, b.y, b.z);
             }
         }
         return 0;
