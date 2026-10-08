@@ -4,3 +4,5 @@ Debug/
 Release/
 *.user
 *.pdb
+
+.autosync.log
