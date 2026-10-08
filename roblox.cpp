@@ -7,41 +7,52 @@
 namespace roblox {
 namespace {
 
-// Children are a pointer vector at Instance::ChildrenStart (0x78);
-// end sits +8 (standard vector layout). The dump's ChildrenEnd=0x8 is the
-// identity field, not the vector end, so it is intentionally not used.
+// Children live behind a node struct at Instance::ChildrenStart (0x78):
+// end = [node+8], first entry = [node], stride 0x10 until entry == end.
+// (Ported from omega's get_children; a flat pointer array does not match live memory.)
 bool ReadChildren(const mem::Reader& r, uintptr_t inst, std::vector<uintptr_t>& out) {
     out.clear();
-    uintptr_t start = 0, end = 0;
-    if (!r.read<uintptr_t>(inst + Offsets::Instance::ChildrenStart, start))
+    uintptr_t node = 0;
+    if (!r.read<uintptr_t>(inst + Offsets::Instance::ChildrenStart, node) || node < 0x10000)
         return false;
-    if (!r.read<uintptr_t>(inst + Offsets::Instance::ChildrenStart + 8, end))
+    uintptr_t end = 0, cur = 0;
+    if (!r.read<uintptr_t>(node + 8, end))
         return false;
-    if (start < 0x10000 || end < start)
+    if (!r.read<uintptr_t>(node, cur))
         return false;
-    size_t count = (end - start) / 8;
-    if (count > 5000)
-        return false;
-    out.resize(count);
-    for (size_t i = 0; i < count; ++i) {
-        if (!r.read<uintptr_t>(start + i * 8, out[i]))
+    for (int i = 0; i < 9000; ++i) {
+        if (cur == end)
+            break;
+        uintptr_t child = 0;
+        if (!r.read<uintptr_t>(cur, child))
             return false;
+        out.push_back(child);
+        cur += 0x10;
     }
     return true;
 }
 
 bool GetName(const mem::Reader& r, uintptr_t inst, std::string& name) {
-    // NameContainer (0x70) holds the instance name string object.
-    if (r.readString(inst + Offsets::Instance::NameContainer, name) && !name.empty())
-        return true;
-    return false;
+    // NameContainer (0x70) points at the name string object (omega's get_name).
+    uintptr_t p = 0;
+    if (!r.read<uintptr_t>(inst + Offsets::Instance::NameContainer, p))
+        return false;
+    return r.readString(p, name);
 }
 
 bool GetClassName(const mem::Reader& r, uintptr_t inst, std::string& cls) {
-    uintptr_t desc = 0;
-    if (!r.read<uintptr_t>(inst + Offsets::Instance::ClassDescriptor, desc))
+    // 3-hop with 0x1F flag redirect (omega's get_class_name).
+    uintptr_t p1 = 0, p2 = 0;
+    if (!r.read<uintptr_t>(inst + Offsets::Instance::ClassDescriptor, p1) || p1 < 0x10000)
         return false;
-    return r.readString(desc + Offsets::Instance::ClassName, cls);
+    if (!r.read<uintptr_t>(p1 + Offsets::Instance::ClassName, p2) || p2 < 0x10000)
+        return false;
+    uintptr_t fl = 0;
+    if (r.read<uintptr_t>(p2 + 0x18, fl) && fl == 0x1F) {
+        if (!r.read<uintptr_t>(p2, p2) || p2 < 0x10000)
+            return false;
+    }
+    return r.readString(p2, cls);
 }
 
 bool FindChildByName(const mem::Reader& r, uintptr_t parent, const char* want, uintptr_t& found) {
@@ -119,84 +130,33 @@ std::string Diag(uint32_t pid) {
     snprintf(buf, sizeof(buf), "workspace read=%d val=0x%llx\n", okWs, (unsigned long long)ws);
     rep += buf;
 
-    uintptr_t start = 0, end = 0;
-    bool okS = r.read<uintptr_t>(dm + Offsets::Instance::ChildrenStart, start);
-    bool okE = r.read<uintptr_t>(dm + Offsets::Instance::ChildrenStart + 8, end);
-    snprintf(buf, sizeof(buf), "children start read=%d val=0x%llx\n", okS,
-             (unsigned long long)start);
-    rep += buf;
-    snprintf(buf, sizeof(buf), "children end read=%d val=0x%llx\n", okE, (unsigned long long)end);
-    rep += buf;
-    if (okS && okE && end >= start) {
-        size_t count = (end - start) / 8;
-        snprintf(buf, sizeof(buf), "children count=%llu\n", (unsigned long long)count);
+    std::vector<uintptr_t> kids;
+    if (!ReadChildren(r, dm, kids)) {
+        snprintf(buf, sizeof(buf), "children walk FAILED\n");
         rep += buf;
-    } else {
-        rep += "NOTE: [0x78]/[0x80] not a valid vector.\n";
-        auto tryStr = [&](uintptr_t o, std::string& s) -> bool {
-            uintptr_t dp = 0;
-            uint32_t ln = 0;
-            if (!r.read<uintptr_t>(o, dp) || !r.read<uint32_t>(o + 0x10, ln))
-                return false;
-            if (dp < 0x10000 || ln == 0 || ln > 64)
-                return false;
-            std::vector<char> sb(ln + 1, 0);
-            if (!r.readBytes(dp, sb.data(), ln))
-                return false;
-            s.assign(sb.data(), ln);
-            return true;
-        };
-        // DataModel's own class via static desc at dm+0x18.
-        uintptr_t dmDesc = 0;
-        r.read<uintptr_t>(dm + Offsets::Instance::ClassDescriptor, dmDesc);
-        std::string dmCls;
-        bool okCls = tryStr(dmDesc + Offsets::Instance::ClassName, dmCls);
-        snprintf(buf, sizeof(buf), "dmDesc=0x%llx class ok=%d '%s'\n", (unsigned long long)dmDesc,
-                 okCls, dmCls.c_str());
-        rep += buf;
-        // Player hunt: every table entry with a DisplayName string + ModelInstance.
-        uintptr_t t0 = 0, t1 = 0;
-        r.read<uintptr_t>(dm + 0xa0, t0);
-        r.read<uintptr_t>(dm + 0xa8, t1);
-        size_t tn = (t1 > t0) ? (t1 - t0) / 8 : 0;
-        snprintf(buf, sizeof(buf), "table count=%llu -- players:\n", (unsigned long long)tn);
-        rep += buf;
-        for (size_t i = 0; i < tn && i < 2000; ++i) {
-            uintptr_t k = 0;
-            if (!r.read<uintptr_t>(t0 + i * 8, k) || k < 0x10000)
-                continue;
-            std::string dn;
-            if (!tryStr(k + Offsets::Player::DisplayName, dn) || dn.empty())
-                continue;
-            uintptr_t model = 0, team = 0;
-            uint64_t uid = 0;
-            r.read<uintptr_t>(k + Offsets::Player::ModelInstance, model);
-            r.read<uintptr_t>(k + Offsets::Player::Team, team);
-            r.read<uint64_t>(k + Offsets::Player::UserId, uid);
-            snprintf(buf, sizeof(buf), "  [%llu] k=0x%llx display='%s' uid=%llu model=0x%llx team=0x%llx\n",
-                     (unsigned long long)i, (unsigned long long)k, dn.c_str(),
-                     (unsigned long long)uid, (unsigned long long)model, (unsigned long long)team);
-            rep += buf;
-        }
-        return rep + "HUNT DONE\n";
+        return rep + "DIAG DONE\n";
     }
-
-    size_t count = (end - start) / 8;
-    size_t show = count < 40 ? count : 40;
+    snprintf(buf, sizeof(buf), "children count=%llu\n", (unsigned long long)kids.size());
+    rep += buf;
+    size_t show = kids.size() < 60 ? kids.size() : 60;
     for (size_t i = 0; i < show; ++i) {
-        uintptr_t k = 0;
-        if (!r.read<uintptr_t>(start + i * 8, k)) {
-            rep += "  [i] ptr unreadable\n";
-            continue;
-        }
         std::string n, c;
-        GetName(r, k, n);
-        GetClassName(r, k, c);
+        GetName(r, kids[i], n);
+        GetClassName(r, kids[i], c);
         snprintf(buf, sizeof(buf), "  [%llu] 0x%llx name='%s' class='%s'\n", (unsigned long long)i,
-                 (unsigned long long)k, n.c_str(), c.c_str());
+                 (unsigned long long)kids[i], n.c_str(), c.c_str());
         rep += buf;
     }
-    return rep;
+    // Players hunt via class match.
+    for (auto k : kids) {
+        std::string c;
+        if (GetClassName(r, k, c) && c == "Players") {
+            snprintf(buf, sizeof(buf), "PLAYERS at 0x%llx\n", (unsigned long long)k);
+            rep += buf;
+            break;
+        }
+    }
+    return rep + "DIAG DONE\n";
 }
 
 bool Refresh(const mem::Reader& r, Snapshot& out, bool teamCheck, float maxDist) {

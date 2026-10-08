@@ -50,22 +50,29 @@ bool Reader::readString(uintptr_t strObj, std::string& out) const {
     out.clear();
     if (!proc_ || strObj < 0x10000)
         return false;
-    // Layout used by these dumps: data ptr at +0x0, length at +0x10 (Misc::StringLength).
-    uintptr_t data = 0;
-    uint32_t len = 0;
-    if (!read<uintptr_t>(strObj, data))
+    // Layout (matches omega's read_roblox_string): count at +0x10;
+    // long strings (>15) via data pointer, short ones inline (SSO).
+    uint32_t count = 0;
+    if (!read<uint32_t>(strObj + 0x10, count))
         return false;
-    if (!read<uint32_t>(strObj + 0x10, len))
+    if (count == 0 || count > 128)
         return false;
-    if (len == 0 || len > 64)
-        return false;
-    if (data < 0x10000)
-        return false;
-    std::vector<char> buf(len + 1, 0);
-    if (!readBytes(data, buf.data(), len))
-        return false;
-    out.assign(buf.data(), len);
-    return true;
+    std::vector<char> buf(static_cast<size_t>(count) + 1, 0);
+    if (count > 15) {
+        uintptr_t data = 0;
+        if (!read<uintptr_t>(strObj, data) || data < 0x10000)
+            return false;
+        if (!readBytes(data, buf.data(), count))
+            return false;
+    } else {
+        if (!readBytes(strObj, buf.data(), count))
+            return false;
+    }
+    out.assign(buf.data(), count);
+    size_t z = out.find('\0');
+    if (z != std::string::npos)
+        out.resize(z);
+    return !out.empty();
 }
 
 } // namespace mem
